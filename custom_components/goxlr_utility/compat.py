@@ -5,8 +5,21 @@ from __future__ import annotations
 import asyncio
 from dataclasses import fields, is_dataclass
 import logging
+import re
 import sys
 from typing import Any, get_args, get_origin, get_type_hints
+
+
+def normalize_key(key: str) -> str:
+    """Normalize GoXLR API keys to Python-style attribute names."""
+    if len(key) == 1 and key.isupper():
+        return key.lower()
+
+    normalized = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", key)
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized).lower()
+    if normalized == "global":
+        return "global_"
+    return normalized
 
 
 def _coerce_value(annotation: Any, value: Any) -> Any:
@@ -30,13 +43,17 @@ def _coerce_value(annotation: Any, value: Any) -> Any:
             if coerced is not value or is_dataclass(arg):
                 return coerced
 
-    if isinstance(annotation, type) and is_dataclass(annotation) and isinstance(value, dict):
-        return _build_dataclass(annotation, value)
+    if (
+        isinstance(annotation, type)
+        and is_dataclass(annotation)
+        and isinstance(value, dict)
+    ):
+        return build_dataclass(annotation, value)
 
     return value
 
 
-def _build_dataclass(model_cls: type, payload: dict[str, Any]) -> Any:
+def build_dataclass(model_cls: type, payload: dict[str, Any]) -> Any:
     """Build a dataclass instance from API payload data."""
     type_hints = get_type_hints(model_cls)
     kwargs: dict[str, Any] = {}
@@ -83,15 +100,18 @@ def apply_goxlrutilityapi_compat() -> None:
             COMMAND_TYPE_SET_MUTE_STATE,
             COMMAND_TYPE_SET_SIMPLE_COLOUR,
             COMMAND_TYPE_SET_VOLUME,
-            KEY_TYPE,
             MUTED_STATE,
+            REQUEST_TYPE_COMMAND,
             REQUEST_TYPE_GET_STATUS,
             RESPONSE_TYPE_OK,
             RESPONSE_TYPE_PATCH,
             RESPONSE_TYPE_STATUS,
             UNMUTED_STATE,
         )
-        from goxlrutilityapi.exceptions import BadMessageException, ConnectionErrorException
+        from goxlrutilityapi.exceptions import (
+            BadMessageException,
+            ConnectionErrorException,
+        )
         import goxlrutilityapi.helpers as helpers_module
         from goxlrutilityapi.models.patch import Patch
         from goxlrutilityapi.models.status import Mixer
@@ -131,6 +151,23 @@ def apply_goxlrutilityapi_compat() -> None:
             if self.type == RESPONSE_TYPE_PATCH and isinstance(self.data, dict):
                 self.data = Patch(**self.data)
 
+    def _extract_serial_from_status(status: Any) -> str | None:
+        """Extract the first mixer serial from a status-like payload."""
+        payload = getattr(status, "data", status)
+        if isinstance(payload, dict) and "Status" in payload:
+            payload = payload["Status"]
+
+        if isinstance(payload, dict):
+            mixers = payload.get("mixers")
+            if isinstance(mixers, dict) and mixers:
+                return str(next(iter(mixers.keys())))
+
+        mixers = getattr(payload, "mixers", None)
+        if isinstance(mixers, dict) and mixers:
+            return str(next(iter(mixers.keys())))
+
+        return None
+
     def _normalize_mixer_from_status(status: Any) -> Any:
         """Return the first mixer from a status-like payload."""
         payload = getattr(status, "data", status)
@@ -143,7 +180,7 @@ def apply_goxlrutilityapi_compat() -> None:
                 mixer = next(iter(mixers.values()), None)
                 if isinstance(mixer, dict):
                     try:
-                        return _build_dataclass(Mixer, mixer)
+                        return build_dataclass(Mixer, mixer)
                     except TypeError:
                         return None
                 return mixer
@@ -153,6 +190,35 @@ def apply_goxlrutilityapi_compat() -> None:
             return next(iter(mixers.values()), None)
 
         return None
+
+    async def _get_serial(self) -> str:
+        """Get the connected mixer serial for command requests."""
+        serial = getattr(self, "_ha_serial_number", None)
+        if serial:
+            return serial
+
+        status = await self.get_status()
+        serial = _extract_serial_from_status(status)
+        if serial is None:
+            raise BadMessageException("No mixer serial available")
+
+        self._ha_serial_number = serial
+        return serial
+
+    def _build_command_request(
+        serial: str,
+        command: str,
+        *args: Any,
+    ) -> dict[str, Any]:
+        """Build a websocket payload matching the daemon's enum format."""
+        if not args:
+            command_payload: Any = command
+        elif len(args) == 1:
+            command_payload = {command: args[0]}
+        else:
+            command_payload = {command: list(args)}
+
+        return {"data": {REQUEST_TYPE_COMMAND: [serial, command_payload]}}
 
     def _get_attribute_names_from_patch(data: Mixer, patch: Patch) -> list[str]:
         """Get attribute names from a patch using dataclass metadata aliases."""
@@ -168,9 +234,13 @@ def apply_goxlrutilityapi_compat() -> None:
             if is_dataclass(current_attribute):
                 for field_info in fields(current_attribute):
                     alias = field_info.metadata.get("alias", field_info.name)
-                    if alias == path or field_info.name == path:
+                    if path in (alias, field_info.name):
                         resolved_name = field_info.name
                         break
+            else:
+                normalized_name = normalize_key(path)
+                if hasattr(current_attribute, normalized_name):
+                    resolved_name = normalized_name
 
             current_attribute = getattr(current_attribute, resolved_name)
             attribute_names.append(resolved_name)
@@ -198,17 +268,26 @@ def apply_goxlrutilityapi_compat() -> None:
         await self._websocket.send_json(payload)
 
         if not wait_for_response:
-            return CompatResponse({"id": request_id, "type": RESPONSE_TYPE_OK, "data": None})
+            return CompatResponse(
+                {"id": request_id, "type": RESPONSE_TYPE_OK, "data": None}
+            )
 
         try:
             await self._message_events[request_id].wait()
-        except asyncio.TimeoutError as error:
+        except TimeoutError as error:
             raise ConnectionErrorException from error
 
         response = self._message_responses.pop(request_id)
         self._message_events.pop(request_id, None)
 
         if response_type is not None and response.type != response_type:
+            if response_type == RESPONSE_TYPE_OK and response.type in (
+                None,
+                "Ok",
+                "ok",
+            ):
+                return response
+
             if not (
                 response_type == RESPONSE_TYPE_STATUS
                 and isinstance(response.data, dict)
@@ -218,73 +297,74 @@ def apply_goxlrutilityapi_compat() -> None:
                     or "mixers" in response.data
                 )
             ):
-                raise BadMessageException(f"Expected {response_type}, got {response.type}")
+                raise BadMessageException(
+                    f"Expected {response_type}, got {response.type}"
+                )
 
         return response
 
     async def _compat_get_status(self) -> Any:
         """Get status from GoXLR Utility."""
         response = await self._send_message({"data": REQUEST_TYPE_GET_STATUS})
-        if isinstance(response.data, dict):
-            return response.data.get("Status", response.data.get("status", response.data))
-        return response.data
+        data = response.data
+        if isinstance(data, dict):
+            data = data.get("Status", data.get("status", data))
+
+        serial = _extract_serial_from_status(data)
+        if serial is not None:
+            self._ha_serial_number = serial
+
+        return data
+
+    async def _send_command(self, command: str, *args: Any) -> None:
+        """Send a GoXLR daemon command without waiting for a reply body."""
+        serial = await _get_serial(self)
+        await self._send_message(
+            _build_command_request(serial, command, *args),
+            wait_for_response=False,
+        )
 
     async def _compat_set_accent_color(self, color: str) -> None:
-        await self._send_message(
-            {"data": {KEY_TYPE: COMMAND_TYPE_SET_SIMPLE_COLOUR, ACCENT: color}},
-            response_type=RESPONSE_TYPE_OK,
+        await _send_command(self, COMMAND_TYPE_SET_SIMPLE_COLOUR, ACCENT, color)
+
+    async def _compat_set_button_color(
+        self, name: str, color_one: str, color_two: str
+    ) -> None:
+        await _send_command(
+            self,
+            COMMAND_TYPE_SET_BUTTON_COLOURS,
+            name,
+            color_one,
+            color_two,
         )
 
-    async def _compat_set_button_color(self, name: str, color_one: str, color_two: str) -> None:
-        await self._send_message(
-            {
-                "data": {
-                    KEY_TYPE: COMMAND_TYPE_SET_BUTTON_COLOURS,
-                    name: {"colour_one": color_one, "colour_two": color_two},
-                }
-            },
-            response_type=RESPONSE_TYPE_OK,
-        )
-
-    async def _compat_set_fader_color(self, name: str, color_top: str, color_bottom: str) -> None:
-        await self._send_message(
-            {
-                "data": {
-                    KEY_TYPE: COMMAND_TYPE_SET_FADER_COLOURS,
-                    name: {"colour_one": color_top, "colour_two": color_bottom},
-                }
-            },
-            response_type=RESPONSE_TYPE_OK,
+    async def _compat_set_fader_color(
+        self, name: str, color_top: str, color_bottom: str
+    ) -> None:
+        await _send_command(
+            self,
+            COMMAND_TYPE_SET_FADER_COLOURS,
+            name,
+            color_top,
+            color_bottom,
         )
 
     async def _compat_set_muted(self, channel: str, muted: bool) -> None:
-        await self._send_message(
-            {
-                "data": {
-                    KEY_TYPE: COMMAND_TYPE_SET_MUTE_STATE,
-                    channel: MUTED_STATE if muted else UNMUTED_STATE,
-                }
-            },
-            response_type=RESPONSE_TYPE_OK,
+        await _send_command(
+            self,
+            COMMAND_TYPE_SET_MUTE_STATE,
+            channel,
+            MUTED_STATE if muted else UNMUTED_STATE,
         )
 
     async def _compat_set_volume(self, channel: str, volume: int) -> None:
-        await self._send_message(
-            {"data": {KEY_TYPE: COMMAND_TYPE_SET_VOLUME, channel: volume}},
-            response_type=RESPONSE_TYPE_OK,
-        )
+        await _send_command(self, COMMAND_TYPE_SET_VOLUME, channel, volume)
 
     async def _compat_load_profile(self, profile: str) -> None:
-        await self._send_message(
-            {"data": {KEY_TYPE: COMMAND_TYPE_LOAD_PROFILE, "profile": profile}},
-            response_type=RESPONSE_TYPE_OK,
-        )
+        await _send_command(self, COMMAND_TYPE_LOAD_PROFILE, profile, False)
 
     async def _compat_load_profile_colours(self, profile: str) -> None:
-        await self._send_message(
-            {"data": {KEY_TYPE: COMMAND_TYPE_LOAD_PROFILE_COLOURS, "profile": profile}},
-            response_type=RESPONSE_TYPE_OK,
-        )
+        await _send_command(self, COMMAND_TYPE_LOAD_PROFILE_COLOURS, profile)
 
     async def _compat_listen(self, patch_callback=None) -> None:
         """Listen for messages with compatibility response parsing."""
@@ -301,7 +381,10 @@ def apply_goxlrutilityapi_compat() -> None:
                     self._message_events[response_id].set()
                     return
 
-                if response.type in (RESPONSE_TYPE_PATCH, RESPONSE_TYPE_STATUS) and patch_callback is not None:
+                if (
+                    response.type in (RESPONSE_TYPE_PATCH, RESPONSE_TYPE_STATUS)
+                    and patch_callback is not None
+                ):
                     await patch_callback(response)
             except (TypeError, ValueError) as error:
                 raise BadMessageException from error
@@ -311,7 +394,7 @@ def apply_goxlrutilityapi_compat() -> None:
     helpers_module.get_mixer_from_status = _normalize_mixer_from_status
     helpers_module.get_attribute_names_from_patch = _get_attribute_names_from_patch
 
-    WebsocketClient._send_message = _compat_send_message
+    setattr(WebsocketClient, "_send_message", _compat_send_message)
     WebsocketClient.get_status = _compat_get_status
     WebsocketClient.set_accent_color = _compat_set_accent_color
     WebsocketClient.set_button_color = _compat_set_button_color

@@ -1,7 +1,9 @@
 """Config flow for GoXLR Utility integration."""
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -17,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import CONNECTION_ERRORS, DOMAIN
-from .helper import CannotConnect, extract_mixer_from_status, setup_connection
+from .helper import CannotConnect, close_connection, extract_mixer_from_status, setup_connection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,7 +64,9 @@ async def validate_input(
         raise CannotConnect("No mixer found")
 
     listener_task.cancel()
-    await websocket_client.disconnect()
+    with contextlib.suppress(asyncio.CancelledError):
+        await listener_task
+    await close_connection(websocket_client)
 
     manufacturer = getattr(mixer.hardware.usb_device, "manufacturer_name", None)
     product = getattr(mixer.hardware.usb_device, "product_name", None)
@@ -91,7 +95,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
-            except (asyncio.TimeoutError, CannotConnect):
+            except asyncio.TimeoutError, CannotConnect:
                 errors["base"] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")

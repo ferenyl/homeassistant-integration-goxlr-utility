@@ -1,4 +1,5 @@
 """Constants for the GoXLR Utility integration."""
+
 from typing import Final
 
 from . import compat  # noqa: F401

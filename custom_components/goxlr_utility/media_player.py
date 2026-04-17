@@ -1,10 +1,9 @@
 """Support for GoXLR Utility media players."""
+
 from __future__ import annotations
 
 import logging
 from typing import Any
-
-from . import compat  # noqa: F401
 
 from goxlrutilityapi.const import MUTED_STATE, NAME_MAP
 from goxlrutilityapi.helpers import get_volume_percentage
@@ -22,11 +21,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import compat  # noqa: F401
 from .const import DOMAIN
 from .coordinator import GoXLRUtilityDataUpdateCoordinator
 from .entity import GoXLRUtilityEntity, GoXLRUtilityMediaPlayerEntityDescription
+from .helper import get_goxlr_attr, get_goxlr_keys
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _get_fader_map_item(fader_status: Any, key: str) -> MapItem | None:
+    """Resolve the map item assigned to a fader."""
+    channel = str(get_goxlr_attr(get_goxlr_attr(fader_status, key), "channel", ""))
+    return NAME_MAP.get(channel) or NAME_MAP.get(channel.lower())
 
 
 def get_muted(
@@ -37,7 +44,7 @@ def get_muted(
     if fader_key is None:
         return False
 
-    fader: FaderStatus = getattr(data.fader_status, fader_key)
+    fader: FaderStatus = get_goxlr_attr(data.fader_status, fader_key)
     if fader is None:
         return False
 
@@ -70,7 +77,7 @@ async def set_volume(
 
     await client.set_volume(
         map_item.key,
-        int(volume * 2.55),
+        max(0, min(255, round(volume * 2.55))),
     )
 
 
@@ -82,18 +89,16 @@ async def async_setup_entry(
     """Set up GoXLR Utility media players based on a config entry."""
     coordinator: GoXLRUtilityDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
+    fader_status = get_goxlr_attr(coordinator.data, "fader_status")
     faders: dict[str, MapItem | None] = {
-        "a": NAME_MAP.get(coordinator.data.fader_status.a.channel),
-        "b": NAME_MAP.get(coordinator.data.fader_status.b.channel),
-        "c": NAME_MAP.get(coordinator.data.fader_status.c.channel),
-        "d": NAME_MAP.get(coordinator.data.fader_status.d.channel),
+        key: _get_fader_map_item(fader_status, key) for key in ("a", "b", "c", "d")
     }
 
     _LOGGER.debug("Faders: %s", faders)
 
-    media_player_descrpitions: list[GoXLRUtilityMediaPlayerEntityDescription] = []
+    media_player_descriptions: list[GoXLRUtilityMediaPlayerEntityDescription] = []
 
-    for key in vars(coordinator.data.levels.volumes):
+    for key in get_goxlr_keys(coordinator.data.levels.volumes):
         _LOGGER.debug("key: %s", key)
 
         # Get map item from map
@@ -106,7 +111,7 @@ async def async_setup_entry(
         )
         _LOGGER.debug("Fader key: %s", fader_key)
 
-        media_player_descrpitions.append(
+        media_player_descriptions.append(
             GoXLRUtilityMediaPlayerEntityDescription(
                 key=key,
                 name=f"{map_item.name if map_item else key}",
@@ -128,15 +133,14 @@ async def async_setup_entry(
             )
         )
 
-    entities: list[GoXLRUtilityMediaPlayer] = []
-    for description in media_player_descrpitions:
-        entities.append(
-            GoXLRUtilityMediaPlayer(
-                coordinator,
-                description,
-                entry.data.copy(),
-            )
+    entities = [
+        GoXLRUtilityMediaPlayer(
+            coordinator,
+            description,
+            entry.data.copy(),
         )
+        for description in media_player_descriptions
+    ]
 
     async_add_entities(entities)
 
@@ -181,7 +185,11 @@ class GoXLRUtilityMediaPlayer(GoXLRUtilityEntity, MediaPlayerEntity):
     @property
     def volume_level(self) -> float | None:
         """Volume level of the media player (0..1)."""
-        return self.entity_description.volume_pct_fn(self.coordinator.data) / 100
+        if (
+            volume_pct := self.entity_description.volume_pct_fn(self.coordinator.data)
+        ) is None:
+            return None
+        return volume_pct / 100
 
     @property
     def is_volume_muted(self) -> bool | None:
@@ -190,13 +198,20 @@ class GoXLRUtilityMediaPlayer(GoXLRUtilityEntity, MediaPlayerEntity):
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Mute the volume."""
+        if self.coordinator.client is None:
+            return
+
         await self.entity_description.set_muted_fn(
             self.coordinator.client,
             mute,
         )
+        await self.coordinator.async_request_refresh()
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
+        if self.coordinator.client is None:
+            return
+
         if self.is_volume_muted:
             await self.async_mute_volume(False)
 
@@ -204,3 +219,4 @@ class GoXLRUtilityMediaPlayer(GoXLRUtilityEntity, MediaPlayerEntity):
             self.coordinator.client,
             volume * 100,
         )
+        await self.coordinator.async_request_refresh()

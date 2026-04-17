@@ -1,4 +1,5 @@
 """Coordinator for GoXLR Utility integration."""
+
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +27,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .helper import CannotConnect, extract_mixer_from_status, setup_connection
+from .helper import CannotConnect, close_connection, extract_mixer_from_status, setup_connection
 
 
 class GoXLRUtilityDataUpdateCoordinator(DataUpdateCoordinator[Mixer]):
@@ -114,7 +115,7 @@ class GoXLRUtilityDataUpdateCoordinator(DataUpdateCoordinator[Mixer]):
     async def cleanup(self) -> None:
         """Disconnect and cleanup items."""
         if self.client is not None:
-            await self.client.disconnect()
+            await close_connection(self.client)
 
     async def _get_mixer(self) -> Mixer:
         """Get mixer from GoXLR Utility."""
@@ -177,10 +178,9 @@ class GoXLRUtilityDataUpdateCoordinator(DataUpdateCoordinator[Mixer]):
             except (asyncio.TimeoutError, CannotConnect) as exception:
                 self.logger.info("Could not connect to GoXLR Utility: %s", exception)
 
-        if self.data is None:
-            mixer: Mixer = await self._get_mixer()
-            self.async_set_updated_data(mixer)
-            self.logger.debug("Data updated: %s", mixer)
+        mixer: Mixer = await self._get_mixer()
+        self.async_set_updated_data(mixer)
+        self.logger.debug("Data updated: %s", mixer)
 
         if self.data is None:
             raise ConfigEntryNotReady("No data found")

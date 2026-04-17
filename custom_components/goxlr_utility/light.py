@@ -1,10 +1,9 @@
 """Support for GoXLR Utility lights."""
+
 from __future__ import annotations
 
 import logging
 from typing import Any, cast
-
-from . import compat  # noqa: F401
 
 from goxlrutilityapi.const import KEY_MAP, NAME_MAP
 from goxlrutilityapi.models.map_item import MapItem
@@ -15,11 +14,23 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import homeassistant.util.color as color_util
 
+from . import compat  # noqa: F401
 from .const import DOMAIN
 from .coordinator import GoXLRUtilityDataUpdateCoordinator
 from .entity import GoXLRUtilityEntity, GoXLRUtilityLightEntityDescription, ItemType
+from .helper import get_goxlr_attr, get_goxlr_keys
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _get_item_colour(
+    data: Any, collection: str, item_key: str, colour: str
+) -> str | None:
+    """Return a light colour from the normalized GoXLR data."""
+    lighting_collection = get_goxlr_attr(data.lighting, collection)
+    item = get_goxlr_attr(lighting_collection, item_key)
+    item_colours = get_goxlr_attr(item, "colours")
+    return get_goxlr_attr(item_colours, colour)
 
 
 async def async_setup_entry(
@@ -30,7 +41,7 @@ async def async_setup_entry(
     """Set up GoXLR Utility light based on a config entry."""
     coordinator: GoXLRUtilityDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    light_descrpitions = [
+    light_descriptions = [
         GoXLRUtilityLightEntityDescription(
             key="light_accent",
             name="Accent",
@@ -39,9 +50,9 @@ async def async_setup_entry(
         ),
     ]
 
-    for key in vars(coordinator.data.lighting.buttons):
-        button_map_item: MapItem | None = NAME_MAP.get(key)
-        light_descrpitions.extend(
+    for key in get_goxlr_keys(coordinator.data.lighting.buttons):
+        button_map_item: MapItem | None = NAME_MAP.get(key) or NAME_MAP.get(key.lower())
+        light_descriptions.extend(
             [
                 GoXLRUtilityLightEntityDescription(
                     key=f"light_button_{key}_active",
@@ -64,9 +75,9 @@ async def async_setup_entry(
             ]
         )
 
-    for key in vars(coordinator.data.lighting.faders):
-        fader_map_item: MapItem | None = NAME_MAP.get(key)
-        light_descrpitions.extend(
+    for key in get_goxlr_keys(coordinator.data.lighting.faders):
+        fader_map_item: MapItem | None = NAME_MAP.get(key) or NAME_MAP.get(key.lower())
+        light_descriptions.extend(
             [
                 GoXLRUtilityLightEntityDescription(
                     key=f"light_fader_{key}_top",
@@ -89,15 +100,14 @@ async def async_setup_entry(
             ]
         )
 
-    entities = []
-    for description in light_descrpitions:
-        entities.append(
-            GoXLRUtilityLight(
-                coordinator,
-                description,
-                entry.data.copy(),
-            )
+    entities = [
+        GoXLRUtilityLight(
+            coordinator,
+            description,
+            entry.data.copy(),
         )
+        for description in light_descriptions
+    ]
 
     async_add_entities(entities)
 
@@ -134,31 +144,37 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
         """Return the rgb color value [int, int, int]."""
         hex_value: str | None = None
         if self.entity_description.item_type == ItemType.ACCENT:
-            hex_value = self.coordinator.data.lighting.simple.accent.colour_one
+            simple = get_goxlr_attr(self.coordinator.data.lighting, "simple")
+            accent = get_goxlr_attr(simple, "accent")
+            hex_value = get_goxlr_attr(accent, "colour_one")
         elif self.entity_description.item_type == ItemType.BUTTON_ACTIVE:
-            item = getattr(
-                self.coordinator.data.lighting.buttons,
+            hex_value = _get_item_colour(
+                self.coordinator.data,
+                "buttons",
                 self.entity_description.item_key,
+                "colour_one",
             )
-            hex_value = item.colours.colour_one if item else None
         elif self.entity_description.item_type == ItemType.BUTTON_INACTIVE:
-            item = getattr(
-                self.coordinator.data.lighting.buttons,
+            hex_value = _get_item_colour(
+                self.coordinator.data,
+                "buttons",
                 self.entity_description.item_key,
+                "colour_two",
             )
-            hex_value = item.colours.colour_two if item else None
         elif self.entity_description.item_type == ItemType.FADER_TOP:
-            item = getattr(
-                self.coordinator.data.lighting.faders,
+            hex_value = _get_item_colour(
+                self.coordinator.data,
+                "faders",
                 self.entity_description.item_key,
+                "colour_one",
             )
-            hex_value = item.colours.colour_one if item else None
         elif self.entity_description.item_type == ItemType.FADER_BOTTOM:
-            item = getattr(
-                self.coordinator.data.lighting.faders,
+            hex_value = _get_item_colour(
+                self.coordinator.data,
+                "faders",
                 self.entity_description.item_key,
+                "colour_two",
             )
-            hex_value = item.colours.colour_two if item else None
 
         return (
             cast(tuple[int, int, int], tuple(color_util.rgb_hex_to_rgb_list(hex_value)))
@@ -177,44 +193,51 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
 
         if self.entity_description.item_type == ItemType.ACCENT:
             await self.coordinator.client.set_accent_color(hex_value)
+            await self.coordinator.async_request_refresh()
             return
 
         item_key = self.entity_description.item_key
-        if (key := KEY_MAP.get(item_key)) is None:
+        if (key := KEY_MAP.get(item_key) or KEY_MAP.get(str(item_key).lower())) is None:
             return
 
         if self.entity_description.item_type == ItemType.BUTTON_ACTIVE:
             await self.coordinator.client.set_button_color(
                 key,
                 hex_value,
-                getattr(
-                    self.coordinator.data.lighting.buttons, item_key
-                ).colours.colour_two,
+                _get_item_colour(
+                    self.coordinator.data, "buttons", item_key, "colour_two"
+                )
+                or "000000",
             )
         elif self.entity_description.item_type == ItemType.BUTTON_INACTIVE:
             await self.coordinator.client.set_button_color(
                 key,
-                getattr(
-                    self.coordinator.data.lighting.buttons, item_key
-                ).colours.colour_one,
+                _get_item_colour(
+                    self.coordinator.data, "buttons", item_key, "colour_one"
+                )
+                or "000000",
                 hex_value,
             )
         elif self.entity_description.item_type == ItemType.FADER_TOP:
             await self.coordinator.client.set_fader_color(
                 key,
                 hex_value,
-                getattr(
-                    self.coordinator.data.lighting.faders, item_key
-                ).colours.colour_two,
+                _get_item_colour(
+                    self.coordinator.data, "faders", item_key, "colour_two"
+                )
+                or "000000",
             )
         elif self.entity_description.item_type == ItemType.FADER_BOTTOM:
             await self.coordinator.client.set_fader_color(
                 key,
-                getattr(
-                    self.coordinator.data.lighting.faders, item_key
-                ).colours.colour_one,
+                _get_item_colour(
+                    self.coordinator.data, "faders", item_key, "colour_one"
+                )
+                or "000000",
                 hex_value,
             )
+
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the light."""
@@ -223,41 +246,48 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
 
         if self.entity_description.item_type == ItemType.ACCENT:
             await self.coordinator.client.set_accent_color("000000")
+            await self.coordinator.async_request_refresh()
             return
 
         item_key = self.entity_description.item_key
-        if (key := KEY_MAP.get(item_key)) is None:
+        if (key := KEY_MAP.get(item_key) or KEY_MAP.get(str(item_key).lower())) is None:
             return
 
         if self.entity_description.item_type == ItemType.BUTTON_ACTIVE:
             await self.coordinator.client.set_button_color(
                 key,
                 "000000",
-                getattr(
-                    self.coordinator.data.lighting.buttons, item_key
-                ).colours.colour_two,
+                _get_item_colour(
+                    self.coordinator.data, "buttons", item_key, "colour_two"
+                )
+                or "000000",
             )
         elif self.entity_description.item_type == ItemType.BUTTON_INACTIVE:
             await self.coordinator.client.set_button_color(
                 key,
-                getattr(
-                    self.coordinator.data.lighting.buttons, item_key
-                ).colours.colour_one,
+                _get_item_colour(
+                    self.coordinator.data, "buttons", item_key, "colour_one"
+                )
+                or "000000",
                 "000000",
             )
         elif self.entity_description.item_type == ItemType.FADER_TOP:
             await self.coordinator.client.set_fader_color(
                 key,
                 "000000",
-                getattr(
-                    self.coordinator.data.lighting.faders, item_key
-                ).colours.colour_two,
+                _get_item_colour(
+                    self.coordinator.data, "faders", item_key, "colour_two"
+                )
+                or "000000",
             )
         elif self.entity_description.item_type == ItemType.FADER_BOTTOM:
             await self.coordinator.client.set_fader_color(
                 key,
-                getattr(
-                    self.coordinator.data.lighting.faders, item_key
-                ).colours.colour_one,
+                _get_item_colour(
+                    self.coordinator.data, "faders", item_key, "colour_one"
+                )
+                or "000000",
                 "000000",
             )
+
+        await self.coordinator.async_request_refresh()
