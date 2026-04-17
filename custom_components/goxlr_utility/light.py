@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
+from . import compat  # noqa: F401
+
 from goxlrutilityapi.const import KEY_MAP, NAME_MAP
 from goxlrutilityapi.models.map_item import MapItem
 

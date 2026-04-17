@@ -1,7 +1,6 @@
 """The GoXLR Utility integration."""
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -36,7 +35,7 @@ async def async_setup_entry(
 
     try:
         await coordinator.setup()
-    except (asyncio.TimeoutError, CannotConnect) as exception:
+    except (TimeoutError, CannotConnect) as exception:
         raise ConfigEntryNotReady(exception) from exception
 
     await coordinator.async_config_entry_first_refresh()

@@ -7,14 +7,13 @@ from datetime import timedelta
 import logging
 from typing import Any
 
+from . import compat  # noqa: F401
+
 from goxlrutilityapi.exceptions import (
     ConnectionClosedException,
     ConnectionErrorException,
 )
-from goxlrutilityapi.helpers import (
-    get_attribute_names_from_patch,
-    get_mixer_from_status,
-)
+from goxlrutilityapi.helpers import get_attribute_names_from_patch
 from goxlrutilityapi.models.patch import Patch
 from goxlrutilityapi.models.response import Response
 from goxlrutilityapi.models.status import Mixer
@@ -27,7 +26,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .helper import CannotConnect, setup_connection
+from .helper import CannotConnect, extract_mixer_from_status, setup_connection
 
 
 class GoXLRUtilityDataUpdateCoordinator(DataUpdateCoordinator[Mixer]):
@@ -124,7 +123,7 @@ class GoXLRUtilityDataUpdateCoordinator(DataUpdateCoordinator[Mixer]):
 
         # Get status and mixer
         status = await self.client.get_status()
-        mixer = get_mixer_from_status(status)
+        mixer = extract_mixer_from_status(status)
         if mixer is None:
             raise ConfigEntryNotReady("No mixer found")
         return mixer

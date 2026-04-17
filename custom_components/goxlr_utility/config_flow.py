@@ -5,8 +5,9 @@ import asyncio
 import logging
 from typing import Any
 
+from . import compat  # noqa: F401
+
 from goxlrutilityapi.const import DEFAULT_PORT
-from goxlrutilityapi.helpers import get_mixer_from_status
 from goxlrutilityapi.websocket_client import WebsocketClient
 import voluptuous as vol
 
@@ -16,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import CONNECTION_ERRORS, DOMAIN
-from .helper import CannotConnect, setup_connection
+from .helper import CannotConnect, extract_mixer_from_status, setup_connection
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,16 +57,23 @@ async def validate_input(
     )
 
     status = await websocket_client.get_status()
-    mixer = get_mixer_from_status(status)
+    mixer = extract_mixer_from_status(status)
     if mixer is None:
         raise CannotConnect("No mixer found")
 
     listener_task.cancel()
     await websocket_client.disconnect()
 
+    manufacturer = getattr(mixer.hardware.usb_device, "manufacturer_name", None)
+    product = getattr(mixer.hardware.usb_device, "product_name", None)
+    identifier = getattr(mixer.hardware, "serial_number", None)
+
+    if not manufacturer or not product or not identifier:
+        raise CannotConnect("Incomplete mixer information received")
+
     return {
-        "title": f"{mixer.hardware.usb_device.manufacturer_name} - {mixer.hardware.usb_device.product_name}",
-        "identifier": mixer.hardware.serial_number,
+        "title": f"{manufacturer} - {product}",
+        "identifier": identifier,
     }
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import compat  # noqa: F401
+
 from goxlrutilityapi.const import NAME_MAP
 from goxlrutilityapi.models.map_item import MapItem
 

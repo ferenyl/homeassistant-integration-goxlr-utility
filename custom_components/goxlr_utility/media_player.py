@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from . import compat  # noqa: F401
+
 from goxlrutilityapi.const import MUTED_STATE, NAME_MAP
 from goxlrutilityapi.helpers import get_volume_percentage
 from goxlrutilityapi.models.map_item import MapItem
