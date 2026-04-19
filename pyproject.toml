@@ -9,26 +9,25 @@ readme = "README.md"
 homepage = "https://github.com/timmo001/homeassistant-integration-goxlr-utility"
 repository = "https://github.com/timmo001/homeassistant-integration-goxlr-utility"
 documentation = "https://github.com/timmo001/homeassistant-integration-goxlr-utility"
+package-mode = false
 classifiers = [
     "Framework :: AsyncIO",
     "Natural Language :: English",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: 3",
 ]
-packages = []
 
 [tool.poetry.dependencies]
-python = "^3.10"
-homeassistant = "^2023.3"
-goxlrutilityapi = "^1.2.5"
+python = ">=3.13,<4.0"
+homeassistant = ">=2025.3"
+goxlrutil-api = "0.0.2"
 
 [tool.poetry.group.dev.dependencies]
-black = "24.3.0"
-hass-nabucasa = "0.67.1"
-pre-commit = "3.3.1"
-pre-commit-hooks = "4.4.0"
-pylint = "2.17.3"
+black = "26.3.1"
+pre-commit = "4.5.1"
+pre-commit-hooks = "6.0.0"
+pylint = "4.0.5"
 
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/timmo001/homeassistant-integration-goxlr-utility/issues"
