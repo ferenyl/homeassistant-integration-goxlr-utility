@@ -1,8 +1,8 @@
 # Home Assistant Integration - GoXLR Utility
 
-Originally a fork of https://github.com/timmo001/homeassistant-integration-goxlr-utility wich is now archived.
+Originally a fork of [timmo001/homeassistant-integration-goxlr-utility](https://github.com/timmo001/homeassistant-integration-goxlr-utility) wich is now archived.
 
-[GoXLR Utility](https://github.com/GoXLR-on-Linux/goxlr-utility) integration for [Home Assistant](https://www.home-assistant.io/) using the https://github.com/ferenyl/goxlrutil_api Python package. This is a third party application from [@GoXLR-on-Linux](https://github.com/GoXLR-on-Linux) that allows for control of the GoXLR on Linux, Mac and Windows.
+[GoXLR Utility](https://github.com/GoXLR-on-Linux/goxlr-utility) integration for [Home Assistant](https://www.home-assistant.io/) using the [ferenyl/goxlrutil_api](https://github.com/ferenyl/goxlrutil_api) Python package. This is a third party application from [@GoXLR-on-Linux](https://github.com/GoXLR-on-Linux) that allows for control of the GoXLR on Linux, Mac and Windows.
 
 > This integration does not connect to the official GoXLR application!
 
