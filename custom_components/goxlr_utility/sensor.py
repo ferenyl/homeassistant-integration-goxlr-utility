@@ -1,11 +1,11 @@
 """Support for GoXLR Utility sensors."""
+
 from __future__ import annotations
 
 from typing import Any, cast
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
@@ -26,18 +26,14 @@ async def async_setup_entry(
     sensor_descriptions: list[GoXLRUtilitySensorEntityDescription] = [
         GoXLRUtilitySensorEntityDescription(
             key="profile_name",
-            name="Profile name",
+            name="Current profile",
             icon="mdi:headphones-settings",
-            entity_category=EntityCategory.DIAGNOSTIC,
-            entity_registry_visible_default=False,
             value=lambda data: data.profile_name,
         ),
         GoXLRUtilitySensorEntityDescription(
             key="microphone_profile_name",
-            name="Microphone profile name",
+            name="Current microphone profile",
             icon="mdi:microphone-settings",
-            entity_category=EntityCategory.DIAGNOSTIC,
-            entity_registry_visible_default=False,
             value=lambda data: data.mic_profile_name,
         ),
     ]

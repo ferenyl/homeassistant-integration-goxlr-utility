@@ -11,7 +11,13 @@ import re
 from typing import Any, TypeVar
 
 from goxlrutil_api import GoXLRClient, WebSocketTransport
-from goxlrutil_api.protocol.types import Button, ChannelName, FaderName
+from goxlrutil_api.protocol.types import (
+    Button,
+    ChannelName,
+    FaderName,
+    InputDevice,
+    OutputDevice,
+)
 import httpx
 
 from homeassistant.core import HomeAssistant
@@ -52,14 +58,20 @@ def _register_map_item(items: dict[str, GoXLRMapItem], item: GoXLRMapItem) -> No
 NAME_MAP: dict[str, GoXLRMapItem] = {}
 for map_item in (
     GoXLRMapItem("Mic", "Microphone", "mdi:microphone"),
+    GoXLRMapItem("Microphone", "Microphone", "mdi:microphone"),
     GoXLRMapItem("LineIn", "Line In", "mdi:audio-input-stereo-minijack"),
     GoXLRMapItem("Console", "Console", "mdi:gamepad-variant"),
     GoXLRMapItem("System", "System", "mdi:laptop"),
     GoXLRMapItem("Game", "Game", "mdi:controller-classic"),
     GoXLRMapItem("Chat", "Chat", "mdi:chat"),
     GoXLRMapItem("Sample", "Sample", "mdi:music-note"),
+    GoXLRMapItem("Samples", "Samples", "mdi:music-note"),
     GoXLRMapItem("Music", "Music", "mdi:music-clef-treble"),
     GoXLRMapItem("Headphones", "Headphones", "mdi:headphones"),
+    GoXLRMapItem("BroadcastMix", "Broadcast Mix", "mdi:broadcast"),
+    GoXLRMapItem("ChatMic", "Chat Mic", "mdi:microphone-message"),
+    GoXLRMapItem("Sampler", "Sampler", "mdi:playlist-music"),
+    GoXLRMapItem("StreamMix2", "Stream Mix 2", "mdi:broadcast"),
     GoXLRMapItem("MicMonitor", "Microphone Monitor", "mdi:ear-hearing"),
     GoXLRMapItem("LineOut", "Line Out", "mdi:audio-video"),
     GoXLRMapItem("A", "Fader 1", "mdi:tune-vertical"),
@@ -126,6 +138,26 @@ def resolve_button(value: Any) -> Button | None:
 def resolve_channel(value: Any) -> ChannelName | None:
     """Resolve a GoXLR channel enum."""
     return resolve_enum(ChannelName, value)
+
+
+def resolve_input(value: Any) -> InputDevice | str | None:
+    """Resolve a GoXLR routing input enum or preserve the raw value."""
+    resolved = resolve_enum(InputDevice, value)
+    if resolved is not None:
+        return resolved
+
+    raw = getattr(value, "value", value)
+    return str(raw) if raw is not None else None
+
+
+def resolve_output(value: Any) -> OutputDevice | str | None:
+    """Resolve a GoXLR routing output enum or preserve the raw value."""
+    resolved = resolve_enum(OutputDevice, value)
+    if resolved is not None:
+        return resolved
+
+    raw = getattr(value, "value", value)
+    return str(raw) if raw is not None else None
 
 
 def resolve_fader(value: Any) -> FaderName | None:
@@ -307,7 +339,7 @@ async def setup_connection(
         if host in {"127.0.0.1", "localhost"}:
             _LOGGER.warning(
                 "GoXLR host '%s' points to the local container. If Home Assistant is "
-                "running in Docker or a devcontainer, use the host machine IP instead.",
+                "running in Docker or a devcontainer, use the host machine IP instead",
                 host,
             )
         with contextlib.suppress(Exception):

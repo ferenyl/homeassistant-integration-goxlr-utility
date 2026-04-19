@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from goxlrutil_api.protocol.types import SimpleColourTargets
+from goxlrutil_api.protocol.types import Button, FaderName, SimpleColourTargets
 
 from homeassistant.components.light import ATTR_RGB_COLOR, ColorMode, LightEntity
 from homeassistant.config_entries import ConfigEntry
@@ -34,6 +34,44 @@ def _get_item_colour(
     return get_goxlr_attr(item_colours, colour)
 
 
+def _get_cached_colour(
+    coordinator: GoXLRUtilityDataUpdateCoordinator,
+    collection: str,
+    item_key: str,
+    colour: str,
+) -> str | None:
+    """Return a cached colour value, falling back to the live mixer data."""
+    cache: dict[tuple[str, str, str], str] = coordinator.__dict__.setdefault(
+        "_light_colour_cache",
+        {},
+    )
+    cache_key = (collection, item_key, colour)
+
+    if cache_key in cache:
+        return cache[cache_key]
+
+    if value := _get_item_colour(coordinator.data, collection, item_key, colour):
+        cache[cache_key] = value
+        return value
+
+    return None
+
+
+def _set_cached_colour(
+    coordinator: GoXLRUtilityDataUpdateCoordinator,
+    collection: str,
+    item_key: str,
+    colour: str,
+    value: str,
+) -> None:
+    """Store a colour value in the shared cache."""
+    cache: dict[tuple[str, str, str], str] = coordinator.__dict__.setdefault(
+        "_light_colour_cache",
+        {},
+    )
+    cache[(collection, item_key, colour)] = value
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -51,7 +89,11 @@ async def async_setup_entry(
         ),
     ]
 
-    for key in get_goxlr_keys(coordinator.data.lighting.buttons):
+    button_keys = {
+        *get_goxlr_keys(coordinator.data.lighting.buttons),
+        *(str(button.value) for button in Button),
+    }
+    for key in sorted(button_keys):
         button_map_item = get_map_item(key)
         light_descriptions.extend(
             [
@@ -72,7 +114,11 @@ async def async_setup_entry(
             ]
         )
 
-    for key in get_goxlr_keys(coordinator.data.lighting.faders):
+    fader_keys = {
+        *get_goxlr_keys(coordinator.data.lighting.faders),
+        *(str(fader.value) for fader in FaderName),
+    }
+    for key in sorted(fader_keys):
         fader_map_item = get_map_item(key)
         light_descriptions.extend(
             [
@@ -126,6 +172,8 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
             description.name,
         )
         self.entity_description = description
+        self._optimistic_rgb_color: tuple[int, int, int] | None = None
+        self._last_rgb_color: tuple[int, int, int] | None = None
 
     @property
     def is_on(self) -> bool:
@@ -141,39 +189,41 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
             accent = get_goxlr_attr(simple, "accent")
             hex_value = get_goxlr_attr(accent, "colour_one")
         elif self.entity_description.item_type == ItemType.BUTTON_ACTIVE:
-            hex_value = _get_item_colour(
-                self.coordinator.data,
+            hex_value = _get_cached_colour(
+                self.coordinator,
                 "buttons",
                 self.entity_description.item_key,
                 "colour_one",
             )
         elif self.entity_description.item_type == ItemType.BUTTON_INACTIVE:
-            hex_value = _get_item_colour(
-                self.coordinator.data,
+            hex_value = _get_cached_colour(
+                self.coordinator,
                 "buttons",
                 self.entity_description.item_key,
                 "colour_two",
             )
         elif self.entity_description.item_type == ItemType.FADER_TOP:
-            hex_value = _get_item_colour(
-                self.coordinator.data,
+            hex_value = _get_cached_colour(
+                self.coordinator,
                 "faders",
                 self.entity_description.item_key,
                 "colour_one",
             )
         elif self.entity_description.item_type == ItemType.FADER_BOTTOM:
-            hex_value = _get_item_colour(
-                self.coordinator.data,
+            hex_value = _get_cached_colour(
+                self.coordinator,
                 "faders",
                 self.entity_description.item_key,
                 "colour_two",
             )
 
-        return (
-            cast(tuple[int, int, int], tuple(color_util.rgb_hex_to_rgb_list(hex_value)))
-            if hex_value
-            else None
-        )
+        if hex_value:
+            return cast(
+                tuple[int, int, int],
+                tuple(color_util.rgb_hex_to_rgb_list(hex_value)),
+            )
+
+        return self._optimistic_rgb_color
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the light."""
@@ -181,9 +231,11 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
         if self.coordinator.client is None or serial is None:
             return
 
-        hex_value = color_util.color_rgb_to_hex(
-            *kwargs.get(ATTR_RGB_COLOR, (255, 255, 255))
-        )
+        rgb_color = kwargs.get(ATTR_RGB_COLOR)
+        if rgb_color is None:
+            rgb_color = self._last_rgb_color or (255, 255, 255)
+
+        hex_value = color_util.color_rgb_to_hex(*rgb_color)
 
         if self.entity_description.item_type == ItemType.ACCENT:
             await self.coordinator.client.set_simple_colour(
@@ -191,6 +243,10 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
                 SimpleColourTargets.Accent,
                 hex_value,
             )
+            self._last_rgb_color = cast(tuple[int, int, int], tuple(rgb_color))
+            self._optimistic_rgb_color = cast(tuple[int, int, int], tuple(rgb_color))
+            if self.hass is not None:
+                self.async_write_ha_state()
             await self.coordinator.async_request_refresh()
             return
 
@@ -204,23 +260,63 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
                 return
 
             if self.entity_description.item_type == ItemType.BUTTON_ACTIVE:
+                other_hex = (
+                    _get_cached_colour(
+                        self.coordinator,
+                        "buttons",
+                        item_key,
+                        "colour_two",
+                    )
+                    or hex_value
+                )
                 await self.coordinator.client.set_button_colour(
                     serial,
                     button,
                     hex_value,
-                    _get_item_colour(
-                        self.coordinator.data, "buttons", item_key, "colour_two"
-                    )
-                    or "000000",
+                    other_hex,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "buttons",
+                    item_key,
+                    "colour_one",
+                    hex_value,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "buttons",
+                    item_key,
+                    "colour_two",
+                    other_hex,
                 )
             else:
+                other_hex = (
+                    _get_cached_colour(
+                        self.coordinator,
+                        "buttons",
+                        item_key,
+                        "colour_one",
+                    )
+                    or hex_value
+                )
                 await self.coordinator.client.set_button_colour(
                     serial,
                     button,
-                    _get_item_colour(
-                        self.coordinator.data, "buttons", item_key, "colour_one"
-                    )
-                    or "000000",
+                    other_hex,
+                    hex_value,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "buttons",
+                    item_key,
+                    "colour_one",
+                    other_hex,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "buttons",
+                    item_key,
+                    "colour_two",
                     hex_value,
                 )
         else:
@@ -229,26 +325,70 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
                 return
 
             if self.entity_description.item_type == ItemType.FADER_TOP:
+                other_hex = (
+                    _get_cached_colour(
+                        self.coordinator,
+                        "faders",
+                        item_key,
+                        "colour_two",
+                    )
+                    or hex_value
+                )
                 await self.coordinator.client.set_fader_colour(
                     serial,
                     fader,
                     hex_value,
-                    _get_item_colour(
-                        self.coordinator.data, "faders", item_key, "colour_two"
-                    )
-                    or "000000",
+                    other_hex,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "faders",
+                    item_key,
+                    "colour_one",
+                    hex_value,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "faders",
+                    item_key,
+                    "colour_two",
+                    other_hex,
                 )
             elif self.entity_description.item_type == ItemType.FADER_BOTTOM:
+                other_hex = (
+                    _get_cached_colour(
+                        self.coordinator,
+                        "faders",
+                        item_key,
+                        "colour_one",
+                    )
+                    or hex_value
+                )
                 await self.coordinator.client.set_fader_colour(
                     serial,
                     fader,
-                    _get_item_colour(
-                        self.coordinator.data, "faders", item_key, "colour_one"
-                    )
-                    or "000000",
+                    other_hex,
+                    hex_value,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "faders",
+                    item_key,
+                    "colour_one",
+                    other_hex,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "faders",
+                    item_key,
+                    "colour_two",
                     hex_value,
                 )
 
+        self._last_rgb_color = cast(tuple[int, int, int], tuple(rgb_color))
+        self._optimistic_rgb_color = cast(tuple[int, int, int], tuple(rgb_color))
+        if self.hass is not None:
+            self.async_write_ha_state()
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -263,6 +403,9 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
                 SimpleColourTargets.Accent,
                 "000000",
             )
+            self._optimistic_rgb_color = (0, 0, 0)
+            if self.hass is not None:
+                self.async_write_ha_state()
             await self.coordinator.async_request_refresh()
             return
 
@@ -276,23 +419,49 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
                 return
 
             if self.entity_description.item_type == ItemType.BUTTON_ACTIVE:
+                other_hex = (
+                    _get_cached_colour(
+                        self.coordinator,
+                        "buttons",
+                        item_key,
+                        "colour_two",
+                    )
+                    or "000000"
+                )
                 await self.coordinator.client.set_button_colour(
                     serial,
                     button,
                     "000000",
-                    _get_item_colour(
-                        self.coordinator.data, "buttons", item_key, "colour_two"
-                    )
-                    or "000000",
+                    other_hex,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "buttons",
+                    item_key,
+                    "colour_one",
+                    "000000",
                 )
             else:
+                other_hex = (
+                    _get_cached_colour(
+                        self.coordinator,
+                        "buttons",
+                        item_key,
+                        "colour_one",
+                    )
+                    or "000000"
+                )
                 await self.coordinator.client.set_button_colour(
                     serial,
                     button,
-                    _get_item_colour(
-                        self.coordinator.data, "buttons", item_key, "colour_one"
-                    )
-                    or "000000",
+                    other_hex,
+                    "000000",
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "buttons",
+                    item_key,
+                    "colour_two",
                     "000000",
                 )
         else:
@@ -301,24 +470,53 @@ class GoXLRUtilityLight(GoXLRUtilityEntity, LightEntity):
                 return
 
             if self.entity_description.item_type == ItemType.FADER_TOP:
+                other_hex = (
+                    _get_cached_colour(
+                        self.coordinator,
+                        "faders",
+                        item_key,
+                        "colour_two",
+                    )
+                    or "000000"
+                )
                 await self.coordinator.client.set_fader_colour(
                     serial,
                     fader,
                     "000000",
-                    _get_item_colour(
-                        self.coordinator.data, "faders", item_key, "colour_two"
-                    )
-                    or "000000",
+                    other_hex,
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "faders",
+                    item_key,
+                    "colour_one",
+                    "000000",
                 )
             elif self.entity_description.item_type == ItemType.FADER_BOTTOM:
+                other_hex = (
+                    _get_cached_colour(
+                        self.coordinator,
+                        "faders",
+                        item_key,
+                        "colour_one",
+                    )
+                    or "000000"
+                )
                 await self.coordinator.client.set_fader_colour(
                     serial,
                     fader,
-                    _get_item_colour(
-                        self.coordinator.data, "faders", item_key, "colour_one"
-                    )
-                    or "000000",
+                    other_hex,
+                    "000000",
+                )
+                _set_cached_colour(
+                    self.coordinator,
+                    "faders",
+                    item_key,
+                    "colour_two",
                     "000000",
                 )
 
+        self._optimistic_rgb_color = (0, 0, 0)
+        if self.hass is not None:
+            self.async_write_ha_state()
         await self.coordinator.async_request_refresh()

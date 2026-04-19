@@ -9,6 +9,7 @@ from homeassistant.components.binary_sensor import BinarySensorEntityDescription
 from homeassistant.components.light import LightEntityDescription
 from homeassistant.components.media_player import MediaPlayerEntityDescription
 from homeassistant.components.sensor import SensorEntityDescription
+from homeassistant.components.switch import SwitchEntityDescription
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.typing import UndefinedType
@@ -108,6 +109,14 @@ class GoXLRUtilityMediaPlayerEntityDescription(MediaPlayerEntityDescription):
     volume_pct_fn: Callable = round
     set_muted_fn: Callable = round
     set_volume_fn: Callable = round
+
+
+@dataclass
+class GoXLRUtilitySwitchEntityDescription(SwitchEntityDescription):
+    """Class describing GoXLR Utility switch entities."""
+
+    route_input: str = ""
+    route_output: str = ""
 
 
 @dataclass
