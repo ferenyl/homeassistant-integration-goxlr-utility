@@ -4,11 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import compat  # noqa: F401
-
-from goxlrutilityapi.const import NAME_MAP
-from goxlrutilityapi.models.map_item import MapItem
-
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
@@ -18,6 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import GoXLRUtilityDataUpdateCoordinator
 from .entity import GoXLRUtilityBinarySensorEntityDescription, GoXLRUtilityEntity
+from .helper import get_goxlr_attr, get_goxlr_keys, get_map_item
 
 
 async def async_setup_entry(
@@ -29,29 +25,32 @@ async def async_setup_entry(
     coordinator: GoXLRUtilityDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     binary_sensor_descriptions = []
-    for key in vars(coordinator.data.button_down):
-        map_item: MapItem | None = NAME_MAP.get(key)
+    for key in get_goxlr_keys(coordinator.data.button_down):
+        map_item = get_map_item(key)
         binary_sensor_descriptions.append(
             GoXLRUtilityBinarySensorEntityDescription(
                 key=f"button_{key}",
                 name=f"{map_item.name if map_item else key} pressed",
                 icon=map_item.icon if map_item else "mdi:button-pointer",
                 entity_category=EntityCategory.DIAGNOSTIC,
-                value=lambda data, item_key=key: data.button_down.__dict__.get(
-                    item_key, None
+                value=lambda data, item_key=key: bool(
+                    get_goxlr_attr(
+                        data.button_down,
+                        item_key,
+                        False,
+                    )
                 ),
             )
         )
 
-    entities = []
-    for description in binary_sensor_descriptions:
-        entities.append(
-            GoXLRUtilitySensor(
-                coordinator,
-                description,
-                entry.data.copy(),
-            )
+    entities = [
+        GoXLRUtilitySensor(
+            coordinator,
+            description,
+            entry.data.copy(),
         )
+        for description in binary_sensor_descriptions
+    ]
 
     async_add_entities(entities)
 

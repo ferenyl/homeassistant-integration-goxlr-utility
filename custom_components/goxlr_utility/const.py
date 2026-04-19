@@ -2,17 +2,14 @@
 
 from typing import Final
 
-from . import compat  # noqa: F401
-
-from goxlrutilityapi.exceptions import (
-    ConnectionClosedException,
-    ConnectionErrorException,
-)
+from goxlrutil_api.exceptions import ConnectionError as GoXLRConnectionError
 
 DOMAIN: Final[str] = "goxlr_utility"
+DEFAULT_PORT: Final[int] = 14564
 
 CONNECTION_ERRORS: Final = (
-    ConnectionClosedException,
-    ConnectionErrorException,
-    ConnectionResetError,
+    GoXLRConnectionError,
+    ConnectionError,
+    OSError,
+    TimeoutError,
 )

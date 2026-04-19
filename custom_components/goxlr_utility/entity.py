@@ -1,4 +1,5 @@
 """Entities for GoXLR Utility integration."""
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -39,12 +40,15 @@ class GoXLRUtilityEntity(CoordinatorEntity[GoXLRUtilityDataUpdateCoordinator]):
     ) -> None:
         """Initialize the GoXLR Utility entity."""
         super().__init__(coordinator)
-        keys = [
-            coordinator.data.hardware.usb_device.manufacturer_name,
-            coordinator.data.hardware.usb_device.product_name,
-        ]
-        self._device_name = " ".join(keys)
-        self._key = f"{'_'.join(keys).lower()}_{key}"
+        manufacturer = (
+            coordinator.data.hardware.usb_device.manufacturer_name or "TC-Helicon"
+        )
+        product = coordinator.data.hardware.usb_device.product_name or (
+            f"GoXLR {getattr(coordinator.data.hardware.device_type, 'value', '')}".strip()
+        )
+        keys = [manufacturer, product]
+        self._device_name = " ".join(part for part in keys if part)
+        self._key = f"{'_'.join(part for part in keys if part).lower()}_{key}"
         self._name = f"{self._device_name} {name}"
         self._configuration_url = (
             f"http://{entry_data[CONF_HOST]}:{entry_data[CONF_PORT]}"
@@ -53,8 +57,8 @@ class GoXLRUtilityEntity(CoordinatorEntity[GoXLRUtilityDataUpdateCoordinator]):
             [str(item) for item in coordinator.data.hardware.usb_device.version]
         )
         self._identifier = coordinator.data.hardware.serial_number
-        self._manufacturer = coordinator.data.hardware.usb_device.manufacturer_name
-        self._model = coordinator.data.hardware.usb_device.product_name
+        self._manufacturer = manufacturer
+        self._model = product
 
     @property
     def unique_id(self) -> str:

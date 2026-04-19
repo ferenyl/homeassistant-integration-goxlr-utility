@@ -5,11 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from goxlrutilityapi.const import MUTED_STATE, NAME_MAP
-from goxlrutilityapi.helpers import get_volume_percentage
-from goxlrutilityapi.models.map_item import MapItem
-from goxlrutilityapi.models.status import FaderStatus, Mixer
-from goxlrutilityapi.websocket_client import WebsocketClient
+from goxlrutil_api import GoXLRClient
+from goxlrutil_api.protocol.responses import FaderStatus, MixerStatus
+from goxlrutil_api.protocol.types import MuteState
 
 from homeassistant.components.media_player import (
     MediaPlayerDeviceClass,
@@ -21,23 +19,30 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import compat  # noqa: F401
 from .const import DOMAIN
 from .coordinator import GoXLRUtilityDataUpdateCoordinator
 from .entity import GoXLRUtilityEntity, GoXLRUtilityMediaPlayerEntityDescription
-from .helper import get_goxlr_attr, get_goxlr_keys
+from .helper import (
+    GoXLRMapItem,
+    get_goxlr_attr,
+    get_goxlr_keys,
+    get_map_item,
+    get_volume_percentage,
+    resolve_channel,
+    resolve_fader,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _get_fader_map_item(fader_status: Any, key: str) -> MapItem | None:
+def _get_fader_map_item(fader_status: Any, key: str) -> GoXLRMapItem | None:
     """Resolve the map item assigned to a fader."""
-    channel = str(get_goxlr_attr(get_goxlr_attr(fader_status, key), "channel", ""))
-    return NAME_MAP.get(channel) or NAME_MAP.get(channel.lower())
+    channel = get_goxlr_attr(get_goxlr_attr(fader_status, key), "channel", "")
+    return get_map_item(channel)
 
 
 def get_muted(
-    data: Mixer,
+    data: MixerStatus,
     fader_key: str | None,
 ) -> bool:
     """Get muted state for a fader."""
@@ -48,36 +53,51 @@ def get_muted(
     if fader is None:
         return False
 
-    return fader.mute_state == MUTED_STATE
+    mute_state = get_goxlr_attr(fader, "mute_state")
+    return (
+        mute_state != MuteState.Unmuted and str(mute_state) != MuteState.Unmuted.value
+    )
 
 
 async def set_muted(
-    client: WebsocketClient,
+    client: GoXLRClient,
+    serial: str | None,
     fader_key: str | None,
     muted: bool,
 ) -> None:
     """Set muted state for a fader."""
-    if fader_key is None:
+    if serial is None or fader_key is None:
         return
 
-    await client.set_muted(
-        fader_key.capitalize(),
-        muted,
+    fader = resolve_fader(fader_key)
+    if fader is None:
+        return
+
+    await client.set_fader_mute_state(
+        serial,
+        fader,
+        MuteState.MutedToAll if muted else MuteState.Unmuted,
     )
 
 
 async def set_volume(
-    client: WebsocketClient,
-    map_item: MapItem | None,
+    client: GoXLRClient,
+    serial: str | None,
+    map_item: GoXLRMapItem | None,
     volume: float,
 ) -> None:
     """Set volume for a fader."""
-    if map_item is None:
+    if serial is None or map_item is None:
+        return
+
+    channel = resolve_channel(map_item.key)
+    if channel is None:
         return
 
     await client.set_volume(
-        map_item.key,
-        max(0, min(255, round(volume * 2.55))),
+        serial,
+        channel,
+        max(0, min(255, round(volume * 255))),
     )
 
 
@@ -90,7 +110,7 @@ async def async_setup_entry(
     coordinator: GoXLRUtilityDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     fader_status = get_goxlr_attr(coordinator.data, "fader_status")
-    faders: dict[str, MapItem | None] = {
+    faders: dict[str, GoXLRMapItem | None] = {
         key: _get_fader_map_item(fader_status, key) for key in ("a", "b", "c", "d")
     }
 
@@ -99,17 +119,11 @@ async def async_setup_entry(
     media_player_descriptions: list[GoXLRUtilityMediaPlayerEntityDescription] = []
 
     for key in get_goxlr_keys(coordinator.data.levels.volumes):
-        _LOGGER.debug("key: %s", key)
-
-        # Get map item from map
-        map_item: MapItem | None = NAME_MAP.get(key)
-        _LOGGER.debug("Map item: %s", map_item)
-
-        # Get fader key from map item
+        map_item = get_map_item(key)
         fader_key = next(
-            (key for key, value in faders.items() if value == map_item), None
+            (name for name, value in faders.items() if value == map_item),
+            None,
         )
-        _LOGGER.debug("Fader key: %s", fader_key)
 
         media_player_descriptions.append(
             GoXLRUtilityMediaPlayerEntityDescription(
@@ -120,15 +134,21 @@ async def async_setup_entry(
                 can_mute=fader_key is not None,
                 muted_fn=lambda data, fader_key=fader_key: get_muted(data, fader_key),
                 volume_pct_fn=lambda data, key=key: get_volume_percentage(data, key),
-                set_muted_fn=lambda client, muted, fader_key=fader_key: set_muted(
-                    client,
-                    fader_key,
-                    muted,
+                set_muted_fn=lambda client, serial, muted, fader_key=fader_key: (
+                    set_muted(
+                        client,
+                        serial,
+                        fader_key,
+                        muted,
+                    )
                 ),
-                set_volume_fn=lambda client, value, map_item=map_item: set_volume(
-                    client,
-                    map_item,
-                    value,
+                set_volume_fn=lambda client, serial, value, map_item=map_item: (
+                    set_volume(
+                        client,
+                        serial,
+                        map_item,
+                        value,
+                    )
                 ),
             )
         )
@@ -203,6 +223,7 @@ class GoXLRUtilityMediaPlayer(GoXLRUtilityEntity, MediaPlayerEntity):
 
         await self.entity_description.set_muted_fn(
             self.coordinator.client,
+            self.coordinator.serial_number,
             mute,
         )
         await self.coordinator.async_request_refresh()
@@ -217,6 +238,7 @@ class GoXLRUtilityMediaPlayer(GoXLRUtilityEntity, MediaPlayerEntity):
 
         await self.entity_description.set_volume_fn(
             self.coordinator.client,
-            volume * 100,
+            self.coordinator.serial_number,
+            volume,
         )
         await self.coordinator.async_request_refresh()

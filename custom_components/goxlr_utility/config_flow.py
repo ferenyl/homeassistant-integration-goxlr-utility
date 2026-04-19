@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import logging
 from typing import Any
 
-from . import compat  # noqa: F401
-
-from goxlrutilityapi.const import DEFAULT_PORT
-from goxlrutilityapi.websocket_client import WebsocketClient
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -18,8 +12,13 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import CONNECTION_ERRORS, DOMAIN
-from .helper import CannotConnect, close_connection, extract_mixer_from_status, setup_connection
+from .const import DEFAULT_PORT, DOMAIN
+from .helper import (
+    CannotConnect,
+    close_connection,
+    extract_mixer_from_status,
+    setup_connection,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,44 +34,30 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def listen_for_patches(
-    websocket_client: WebsocketClient,
-) -> None:
-    """Listen for patches from GoXLR Utility."""
-    try:
-        await websocket_client.listen()
-    except CONNECTION_ERRORS as exception:
-        _LOGGER.warning("Connection error: %s", exception)
-        raise CannotConnect from exception
-
-
 async def validate_input(
     hass: HomeAssistant,
     data: dict[str, Any],
 ) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
-    websocket_client = await setup_connection(hass, data)
+    client = await setup_connection(hass, data)
 
-    listener_task = hass.async_create_background_task(
-        listen_for_patches(websocket_client),
-        name="GoXLR Utility Patch Listener",
+    try:
+        status = await client.get_status()
+        mixer = extract_mixer_from_status(status)
+        if mixer is None:
+            raise CannotConnect("No mixer found")
+    finally:
+        await close_connection(client)
+
+    identifier = getattr(mixer.hardware, "serial_number", None)
+    manufacturer = (
+        getattr(mixer.hardware.usb_device, "manufacturer_name", None) or "TC-Helicon"
+    )
+    product = getattr(mixer.hardware.usb_device, "product_name", None) or (
+        f"GoXLR {getattr(getattr(mixer.hardware, 'device_type', None), 'value', '')}".strip()
     )
 
-    status = await websocket_client.get_status()
-    mixer = extract_mixer_from_status(status)
-    if mixer is None:
-        raise CannotConnect("No mixer found")
-
-    listener_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await listener_task
-    await close_connection(websocket_client)
-
-    manufacturer = getattr(mixer.hardware.usb_device, "manufacturer_name", None)
-    product = getattr(mixer.hardware.usb_device, "product_name", None)
-    identifier = getattr(mixer.hardware, "serial_number", None)
-
-    if not manufacturer or not product or not identifier:
+    if not identifier:
         raise CannotConnect("Incomplete mixer information received")
 
     return {
@@ -95,7 +80,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
-            except asyncio.TimeoutError, CannotConnect:
+            except (TimeoutError, CannotConnect) as exception:
+                _LOGGER.warning(
+                    "Failed to connect to GoXLR Utility at %s:%s: %s",
+                    user_input.get(CONF_HOST),
+                    user_input.get(CONF_PORT),
+                    exception,
+                )
                 errors["base"] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
