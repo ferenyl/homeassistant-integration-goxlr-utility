@@ -43,9 +43,14 @@ build-backend = "poetry.core.masonry.api"
 # duplicate-code - unavoidable
 # used-before-assignment - false positives with TYPE_CHECKING structures
 disable = [
+    "abstract-method",
     "duplicate-code",
     "format",
     "too-many-ancestors",
+    "too-many-branches",
     "too-many-instance-attributes",
+    "too-many-return-statements",
+    "unexpected-keyword-arg",
+    "unnecessary-dunder-call",
     "used-before-assignment",
 ]

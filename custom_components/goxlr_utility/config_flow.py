@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Self
 
 import voluptuous as vol
 
@@ -70,6 +70,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for GoXLR Utility."""
 
     VERSION = 1
+
+    def is_matching(self, other_flow: Self) -> bool:
+        """Return True if another in-progress flow is for the same device."""
+        return False
 
     async def async_step_user(
         self,
