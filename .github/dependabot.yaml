@@ -11,6 +11,9 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+      github-actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
   - package-ecosystem: "pip"
     directory: "/"
@@ -21,4 +24,7 @@ updates:
       timezone: Europe/Stockholm
     groups:
       pip:
+        patterns: ["*"]
+      pip-security:
+        applies-to: security-updates
         patterns: ["*"]
