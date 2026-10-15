@@ -24,10 +24,10 @@ homeassistant = ">=2025.3"
 goxlrutil-api = "0.0.2"
 
 [tool.poetry.group.dev.dependencies]
-black = "26.3.1"
-pre-commit = "4.5.1"
+black = "26.10.1"
+pre-commit = "4.6.2"
 pre-commit-hooks = "6.0.0"
-pylint = "4.0.5"
+pylint = "4.1.3"
 
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/timmo001/homeassistant-integration-goxlr-utility/issues"
