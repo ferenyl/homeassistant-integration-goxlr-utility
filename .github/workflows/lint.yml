@@ -45,3 +45,17 @@ jobs:
     uses: timmo001/workflows/.github/workflows/lint-markdownlint.yml@master
   lint-yamllint:
     uses: timmo001/workflows/.github/workflows/lint-yamllint.yml@master
+  lint-gate:
+    name: ✅ Lint gate
+    if: always()
+    needs:
+      - lint-pylint
+      - lint-jsonlint
+      - lint-markdown-links
+      - lint-markdownlint
+      - lint-yamllint
+    runs-on: ubuntu-latest
+    steps:
+      - name: ✅ Check lint results
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

@@ -1,12 +1,21 @@
 # Home Assistant Integration - GoXLR Utility
 
-Originally a fork of [timmo001/homeassistant-integration-goxlr-utility](https://github.com/timmo001/homeassistant-integration-goxlr-utility) wich is now archived.
+Originally a fork of
+[timmo001/homeassistant-integration-goxlr-utility](https://github.com/timmo001/homeassistant-integration-goxlr-utility)
+wich is now archived.
 
-[GoXLR Utility](https://github.com/GoXLR-on-Linux/goxlr-utility) integration for [Home Assistant](https://www.home-assistant.io/) using the [ferenyl/goxlrutil_api](https://github.com/ferenyl/goxlrutil_api) Python package. This is a third party application from [@GoXLR-on-Linux](https://github.com/GoXLR-on-Linux) that allows for control of the GoXLR on Linux, Mac and Windows.
+[GoXLR Utility](https://github.com/GoXLR-on-Linux/goxlr-utility) integration
+for [Home Assistant](https://www.home-assistant.io/) using the
+[ferenyl/goxlrutil_api](https://github.com/ferenyl/goxlrutil_api) Python
+package. This is a third party application from
+[@GoXLR-on-Linux](https://github.com/GoXLR-on-Linux) that allows for control of
+the GoXLR on Linux, Mac and Windows.
 
 > This integration does not connect to the official GoXLR application!
 
-Be sure to check out the [GoXLR Utility](https://github.com/GoXLR-on-Linux/goxlr-utility) project for more information.
+Be sure to check out the
+[GoXLR Utility](https://github.com/GoXLR-on-Linux/goxlr-utility) project for
+more information.
 
 ## Installation
 
@@ -16,7 +25,8 @@ This integration is available in the [Home Assistant Community Store](https://ha
 
 ## Setup and Configuration
 
-- Enable `Allow UI network access` the the settings to allow remote access on the network
+- Enable `Allow UI network access` the the settings to allow remote access on
+  the network
 - Add to Home Assistant using the UI
 
 ## Features
