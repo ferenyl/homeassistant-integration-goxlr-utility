@@ -4,4 +4,27 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: daily
+      interval: weekly
+      day: wednesday
+      time: "05:00"
+      timezone: Europe/Stockholm
+    groups:
+      github-actions:
+        patterns: ["*"]
+      github-actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "05:00"
+      timezone: Europe/Stockholm
+    groups:
+      pip:
+        patterns: ["*"]
+      pip-security:
+        applies-to: security-updates
+        patterns: ["*"]
