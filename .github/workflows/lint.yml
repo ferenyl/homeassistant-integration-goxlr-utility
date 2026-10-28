@@ -29,7 +29,7 @@ jobs:
       - name: 🏗 Set up Poetry
         run: pipx install poetry
       - name: 🏗 Set up Python ${{ env.DEFAULT_PYTHON }}
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: ${{ env.DEFAULT_PYTHON }}
           cache: "poetry"
@@ -38,13 +38,13 @@ jobs:
       - name: 🚀 Run Pylint
         run: poetry run pylint custom_components/goxlr_utility
   lint-jsonlint:
-    uses: timmo001/workflows/.github/workflows/lint-jsonlint.yml@996dd60d03b12f28b482074a9eed7083a18e2439 # 20261013.1
+    uses: timmo001/workflows/.github/workflows/lint-jsonlint.yml@6e3616d0d48c9c8ed9865b648107140b99b16551 # 20261024.0
   lint-markdown-links:
-    uses: timmo001/workflows/.github/workflows/lint-markdown-links.yml@996dd60d03b12f28b482074a9eed7083a18e2439 # 20261013.1
+    uses: timmo001/workflows/.github/workflows/lint-markdown-links.yml@6e3616d0d48c9c8ed9865b648107140b99b16551 # 20261024.0
   lint-markdownlint:
-    uses: timmo001/workflows/.github/workflows/lint-markdownlint.yml@996dd60d03b12f28b482074a9eed7083a18e2439 # 20261013.1
+    uses: timmo001/workflows/.github/workflows/lint-markdownlint.yml@6e3616d0d48c9c8ed9865b648107140b99b16551 # 20261024.0
   lint-yamllint:
-    uses: timmo001/workflows/.github/workflows/lint-yamllint.yml@996dd60d03b12f28b482074a9eed7083a18e2439 # 20261013.1
+    uses: timmo001/workflows/.github/workflows/lint-yamllint.yml@6e3616d0d48c9c8ed9865b648107140b99b16551 # 20261024.0
   lint-gate:
     name: ✅ Lint gate
     if: always()
